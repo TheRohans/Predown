@@ -34,26 +34,28 @@ macOS 14+, Xcode, CMake 3.24+ (`brew install cmake`).
 
 ## Build, sign, archive (Xcode)
 
+Give CMake your Team ID once (it's under Membership on developer.apple.com, or
+Xcode > Settings > Accounts). CMake remembers it in `build/CMakeCache.txt`:
+
 ```sh
-cmake -G Xcode -B build                     # or: make open
+cmake -G Xcode -B build -DPREDOWN_TEAM_ID=XXXXXXXXXX     # or: make open TEAM=XXXXXXXXXX
 open build/Predown.xcodeproj
 ```
 
-In Xcode, set your Team under *Signing & Capabilities* for **both** the
-`Predown` and `PredownQuickLook` targets. Then pick the `Predown` scheme and
-choose Product > Archive. From the Organizer, use Distribute App > Custom >
-Copy App (or Developer ID).
+Pick the `Predown` scheme and choose Product > Archive. From the Organizer, use
+Distribute App > Developer ID (or Custom > Copy App).
 
-To skip picking the team each time you regenerate:
-`cmake -G Xcode -B build -DPREDOWN_TEAM_ID=XXXXXXXXXX`.
+You can also leave the ID out and choose the team in Xcode under *Signing &
+Capabilities* for **both** `Predown` and `PredownQuickLook`. That setting is
+lost whenever CMake regenerates the project, so passing the ID is easier.
 
-Note that `build/` is generated: regenerating overwrites any setting changed by
-hand in Xcode, so put permanent changes in `CMakeLists.txt`.
+`build/` is generated: anything changed by hand in Xcode is overwritten when
+CMake re-runs, so put permanent changes in `CMakeLists.txt`.
 
 ## Build from the terminal
 
 ```sh
-make install          # Release build, signed to run locally, copied to /Applications
+make install          # Release build (ad-hoc signed if no team is set), copied to /Applications
 make preview FILE=sample.md
 ```
 

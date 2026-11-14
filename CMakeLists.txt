@@ -19,7 +19,13 @@ set(CMAKE_Swift_LANGUAGE_VERSION 5)
 set(CMAKE_XCODE_GENERATE_SCHEME ON)
 
 set(PREDOWN_BUNDLE_ID "com.therohans.predown" CACHE STRING "App bundle identifier")
-set(PREDOWN_TEAM_ID "" CACHE STRING "Apple Developer Team ID (leave empty to pick a team in Xcode)")
+# Your Apple Developer Team ID. Pass it once (-DPREDOWN_TEAM_ID=...) or export
+# PREDOWN_TEAM_ID in your shell; it's remembered in the build cache after that.
+set(PREDOWN_TEAM_ID "$ENV{PREDOWN_TEAM_ID}" CACHE STRING "Apple Developer Team ID")
+if(NOT PREDOWN_TEAM_ID)
+  message(WARNING "PREDOWN_TEAM_ID is not set. Pick a team for both targets in Xcode "
+                  "(Signing & Capabilities) before archiving, or re-run with -DPREDOWN_TEAM_ID=XXXXXXXXXX.")
+endif()
 set(PREDOWN_BUILD_NUMBER "1" CACHE STRING "CFBundleVersion")
 
 # ---------------------------------------------------------------------------
@@ -58,16 +64,13 @@ function(predown_common target)
     XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT[variant=Release] "dwarf-with-dsym"
     XCODE_ATTRIBUTE_SWIFT_OPTIMIZATION_LEVEL[variant=Debug] "-Onone"
     XCODE_ATTRIBUTE_SWIFT_OPTIMIZATION_LEVEL[variant=Release] "-O"
+    # Normal automatic signing. Never bake in "-" (Sign to Run Locally): choosing
+    # a team in Xcode doesn't clear it, and the archive ends up with no team.
     XCODE_ATTRIBUTE_CODE_SIGN_STYLE Automatic
+    XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development"
   )
   if(PREDOWN_TEAM_ID)
-    set_target_properties(${target} PROPERTIES
-      XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${PREDOWN_TEAM_ID}"
-      XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development"
-    )
-  else()
-    # "Sign to Run Locally" until a team is chosen in Xcode.
-    set_target_properties(${target} PROPERTIES XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "-")
+    set_target_properties(${target} PROPERTIES XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${PREDOWN_TEAM_ID}")
   endif()
 endfunction()
 
