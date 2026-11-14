@@ -67,7 +67,11 @@ final class DocumentModel: ObservableObject {
         pageObserver = NotificationCenter.default.addObserver(
             forName: .PDFViewPageChanged, object: pdfView, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateCurrentPage() }
+            // PDFKit posts this synchronously, mid-update; don't call back into
+            // it until it has finished.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.updateCurrentPage() }
+            }
         }
     }
 

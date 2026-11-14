@@ -105,6 +105,7 @@ add_executable(Predown MACOSX_BUNDLE
   App/MarkdownFile.swift
   App/PagedRenderer.swift
   App/FileWatcher.swift
+  App/Assets.xcassets
   ${SHARED_SOURCES}
 )
 predown_common(Predown)
@@ -119,6 +120,8 @@ set_target_properties(Predown PROPERTIES
   XCODE_ATTRIBUTE_INSTALL_PATH "/Applications"
   XCODE_ATTRIBUTE_SKIP_INSTALL NO
   XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/../Frameworks"
+  RESOURCE App/Assets.xcassets
+  XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon
   XCODE_ATTRIBUTE_COMBINE_HIDPI_IMAGES YES
   XCODE_EMBED_APP_EXTENSIONS PredownQuickLook
   XCODE_EMBED_APP_EXTENSIONS_CODE_SIGN_ON_COPY ON

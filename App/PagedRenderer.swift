@@ -73,15 +73,13 @@ final class PagedRenderer: NSObject, WKNavigationDelegate {
         // Make the view exactly as tall as the pages so every slice is in bounds.
         resize(width: g.width, height: g.height * CGFloat(pageCount))
 
-        let pdf = PDFDocument()
+        var slices: [Data] = []
         for i in 0..<pageCount {
             let cfg = WKPDFConfiguration()
             cfg.rect = CGRect(x: 0, y: g.height * CGFloat(i), width: g.width, height: g.height)
-            let data = try await createPDF(cfg)
-            if let page = PDFDocument(data: data)?.page(at: 0) {
-                pdf.insert(page, at: pdf.pageCount)
-            }
+            slices.append(try await createPDF(cfg))
         }
+        let pdf = try Self.merge(slices)
 
         let anchors = (dict["anchors"] as? [String: Any] ?? [:]).compactMapValues { ($0 as? NSNumber)?.doubleValue }
         resolveInternalLinks(in: pdf, anchors: anchors, geometry: g)
@@ -103,6 +101,63 @@ final class PagedRenderer: NSObject, WKNavigationDelegate {
 
         resize(width: g.width, height: g.height)
         return Output(document: pdf, headings: headings)
+    }
+
+    // MARK: - Assembling pages
+
+    private struct Link {
+        let bounds: CGRect
+        let url: URL
+    }
+
+    /// Joins the one-page PDFs WebKit produced into a single PDF file and opens
+    /// that, so every page truly belongs to one document. (Moving PDFPages out of
+    /// temporary PDFDocuments upsets PDFKit's page locking; right-click → crash.)
+    /// Drawing a page doesn't carry its link annotations, so those are re-added.
+    private static func merge(_ slices: [Data]) throws -> PDFDocument {
+        let output = NSMutableData()
+        guard let consumer = CGDataConsumer(data: output as CFMutableData),
+              let ctx = CGContext(consumer: consumer, mediaBox: nil, nil)
+        else { throw RenderError.badScriptResult }
+
+        var links: [[Link]] = []
+        for data in slices {
+            guard let provider = CGDataProvider(data: data as CFData),
+                  let source = CGPDFDocument(provider),
+                  let page = source.page(at: 1) else {
+                // Keep page numbering intact with a blank page.
+                ctx.beginPDFPage(nil)
+                ctx.endPDFPage()
+                links.append([])
+                continue
+            }
+            var box = page.getBoxRect(.mediaBox)
+            let boxData = Data(bytes: &box, count: MemoryLayout<CGRect>.size)
+            ctx.beginPDFPage([kCGPDFContextMediaBox as String: boxData] as CFDictionary)
+            ctx.drawPDFPage(page)
+            ctx.endPDFPage()
+
+            let annotations = PDFDocument(data: data)?.page(at: 0)?.annotations ?? []
+            links.append(annotations.compactMap { a in
+                guard let url = (a.action as? PDFActionURL)?.url ?? a.url else { return nil }
+                return Link(bounds: a.bounds, url: url)
+            })
+        }
+        ctx.closePDF()
+
+        guard let pdf = PDFDocument(data: output as Data) else { throw RenderError.badScriptResult }
+        for (i, pageLinks) in links.enumerated() {
+            guard let page = pdf.page(at: i) else { continue }
+            for link in pageLinks {
+                let annotation = PDFAnnotation(bounds: link.bounds, forType: .link, withProperties: nil)
+                let border = PDFBorder()
+                border.lineWidth = 0
+                annotation.border = border
+                annotation.action = PDFActionURL(url: link.url)
+                page.addAnnotation(annotation)
+            }
+        }
+        return pdf
     }
 
     // MARK: - Outline & links

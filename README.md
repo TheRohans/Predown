@@ -84,4 +84,6 @@ App/         SwiftUI app: document window, toolbar, menus, renderer
 QuickLook/   Quick Look preview extension
 Shared/      md4c wrapper, stylesheet, paginator (compiled into both)
 third_party/ md4c sources
+scripts/     make_icon.py: draws the app icon (Pillow); point it at
+             App/Assets.xcassets/AppIcon.appiconset to regenerate every size
 ```
