@@ -55,6 +55,28 @@ struct ContentView: View {
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
+            Toggle(isOn: $model.highlightMode) {
+                Label("Highlight", systemImage: "highlighter")
+            }
+            .toggleStyle(.button)
+            .help("Highlight text as you select it (⌃⌘H highlights the current selection)")
+            .disabled(model.pdf == nil)
+
+            Menu {
+                Picker("Highlight Colour", selection: $model.highlightColor) {
+                    ForEach(HighlightColor.allCases) { color in
+                        Label { Text(color.name) } icon: { Image(nsImage: color.swatch) }
+                            .tag(color)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                Label { Text("Highlight Colour") } icon: { Image(nsImage: model.highlightColor.swatch) }
+            }
+            .help("Highlight colour")
+            .disabled(model.pdf == nil)
+
             ControlGroup {
                 Button { model.zoomOut() } label: { Label("Zoom Out", systemImage: "minus.magnifyingglass") }
                     .help("Zoom out")

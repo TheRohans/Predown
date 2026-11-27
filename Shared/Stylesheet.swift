@@ -38,8 +38,9 @@ enum Stylesheet {
       -webkit-font-smoothing: antialiased;
       font-kerning: normal;
       font-variant-ligatures: common-ligatures;
-      -webkit-hyphens: auto;
-      hyphens: auto;
+      /* No auto-hyphenation: split words break search and highlight anchoring. */
+      -webkit-hyphens: manual;
+      hyphens: manual;
       overflow-wrap: break-word;
     }
     body > :first-child { margin-top: 0 !important; }

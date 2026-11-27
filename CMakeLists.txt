@@ -108,6 +108,8 @@ add_executable(Predown MACOSX_BUNDLE
   App/MarkdownFile.swift
   App/PagedRenderer.swift
   App/FileWatcher.swift
+  App/Highlights.swift
+  App/PredownPDFView.swift
   App/Assets.xcassets
   ${SHARED_SOURCES}
 )

@@ -70,6 +70,31 @@ struct PredownCommands: Commands {
             Divider()
         }
 
+        CommandMenu("Tools") {
+            Button("Highlight Selection") { model?.highlightSelection() }
+                .keyboardShortcut("h", modifiers: [.command, .control])
+                .disabled(!(model?.hasSelection ?? false))
+            Toggle("Highlight As I Select", isOn: Binding {
+                model?.highlightMode ?? false
+            } set: { on in
+                model?.highlightMode = on
+            })
+            .disabled(!hasDocument)
+            Menu("Highlight Colour") {
+                ForEach(HighlightColor.allCases) { color in
+                    Toggle(color.name, isOn: Binding {
+                        model?.highlightColor == color
+                    } set: { _ in
+                        model?.highlightColor = color
+                    })
+                }
+            }
+            .disabled(!hasDocument)
+            Divider()
+            Button("Remove All Highlights…") { model?.removeAllHighlights() }
+                .disabled(!(model?.hasHighlights ?? false))
+        }
+
         CommandMenu("Go") {
             Button("Previous Page") { model?.previousPage() }
                 .keyboardShortcut(.upArrow, modifiers: [.command, .option])

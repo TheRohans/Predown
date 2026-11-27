@@ -37,7 +37,17 @@ final class DocumentModel: ObservableObject {
         didSet { pdfView.displayMode = displayMode }
     }
 
-    let pdfView = PDFView()
+    @Published private(set) var hasSelection = false
+    @Published var highlightColor: HighlightColor =
+        HighlightColor(rawValue: UserDefaults.standard.string(forKey: "highlightColor") ?? "") ?? .yellow {
+        didSet { UserDefaults.standard.set(highlightColor.rawValue, forKey: "highlightColor") }
+    }
+    /// Like Preview's highlighter button: while on, every selection gets highlighted.
+    @Published var highlightMode = false {
+        didSet { if highlightMode && !oldValue && hasSelection { highlightSelection() } }
+    }
+
+    let pdfView = PredownPDFView()
     let thumbnailView = PDFThumbnailView()
     weak var searchField: NSSearchField?
 
@@ -49,7 +59,9 @@ final class DocumentModel: ObservableObject {
     private var needsRender = false
     private var modeBeforeSearch: SidebarMode = .thumbnails
     private var visibilityBeforeSearch: NavigationSplitViewVisibility = .detailOnly
-    nonisolated(unsafe) private var pageObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
+    private var highlights: [StoredHighlight] = []
+    private var annotationOwners: [PDFAnnotation: StoredHighlight.ID] = [:]
 
     init() {
         pdfView.displayMode = .singlePageContinuous
@@ -64,19 +76,34 @@ final class DocumentModel: ObservableObject {
         thumbnailView.allowsDragging = false
         thumbnailView.allowsMultipleSelection = false
 
-        pageObserver = NotificationCenter.default.addObserver(
+        // PDFKit posts these synchronously, mid-update; don't call back into it
+        // until it has finished.
+        observers.append(NotificationCenter.default.addObserver(
             forName: .PDFViewPageChanged, object: pdfView, queue: .main
         ) { [weak self] _ in
-            // PDFKit posts this synchronously, mid-update; don't call back into
-            // it until it has finished.
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.updateCurrentPage() } }
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .PDFViewSelectionChanged, object: pdfView, queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.updateHasSelection() } }
+        })
+
+        pdfView.contextItems = { [weak self] annotation in
+            MainActor.assumeIsolated { self?.contextItems(for: annotation) ?? [] }
+        }
+        pdfView.onMouseUp = { [weak self] in
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.updateCurrentPage() }
+                MainActor.assumeIsolated {
+                    guard let self, self.highlightMode else { return }
+                    self.highlightSelection()
+                }
             }
         }
     }
 
     deinit {
-        if let pageObserver { NotificationCenter.default.removeObserver(pageObserver) }
+        for o in observers { NotificationCenter.default.removeObserver(o) }
     }
 
     var pageCount: Int { pdf?.pageCount ?? 0 }
@@ -91,6 +118,7 @@ final class DocumentModel: ObservableObject {
     func open(text: String, url: URL?) {
         if fileURL == nil, let url {
             fileURL = url
+            highlights = HighlightStore.shared.highlights(for: url)
             watcher = FileWatcher(url: url) { [weak self] in
                 MainActor.assumeIsolated { self?.reloadFromDisk() }
             }
@@ -156,6 +184,7 @@ final class DocumentModel: ObservableObject {
             }
         }
         updateCurrentPage()
+        applyHighlights()
         if !searchText.isEmpty { runSearch(jumpToFirst: false) }
     }
 
@@ -265,6 +294,120 @@ final class DocumentModel: ObservableObject {
     func nextPage() { pdfView.goToNextPage(nil) }
     func firstPage() { pdfView.goToFirstPage(nil) }
     func lastPage() { pdfView.goToLastPage(nil) }
+
+    // MARK: - Highlights
+
+    private func updateHasSelection() {
+        let text = pdfView.currentSelection?.string ?? ""
+        hasSelection = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var hasHighlights: Bool { !highlights.isEmpty }
+
+    /// Highlights the current selection (Preview: Tools > Annotate > Highlight).
+    func highlightSelection(_ color: HighlightColor? = nil) {
+        guard let pdf, let selection = pdfView.currentSelection else { return }
+        let text = DocumentText(pdf)
+        guard let highlight = text.anchor(for: selection, in: pdf, color: color ?? highlightColor) else { return }
+        highlights.append(highlight)
+        saveHighlights()
+        add(highlight, using: text)
+        pdfView.clearSelection()
+    }
+
+    func setColor(_ color: HighlightColor, for id: StoredHighlight.ID) {
+        guard let i = highlights.firstIndex(where: { $0.id == id }) else { return }
+        highlights[i].color = color
+        saveHighlights()
+        for (annotation, owner) in annotationOwners where owner == id {
+            annotation.color = color.annotationColor
+        }
+        highlightColor = color
+    }
+
+    func removeHighlight(_ id: StoredHighlight.ID) {
+        highlights.removeAll { $0.id == id }
+        saveHighlights()
+        for (annotation, owner) in annotationOwners where owner == id {
+            annotation.page?.removeAnnotation(annotation)
+            annotationOwners[annotation] = nil
+        }
+    }
+
+    func removeAllHighlights() {
+        guard !highlights.isEmpty, let window = pdfView.window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Remove all highlights from this document?"
+        alert.informativeText = "This can't be undone."
+        alert.addButton(withTitle: "Remove All")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            self.highlights = []
+            self.saveHighlights()
+            self.applyHighlights()
+        }
+    }
+
+    private func saveHighlights() {
+        guard let fileURL else { return }
+        HighlightStore.shared.setHighlights(highlights, for: fileURL)
+        objectWillChange.send()
+    }
+
+    /// Puts every stored highlight onto the current pages. Highlights whose text
+    /// has been edited away are kept (they come back if the text does).
+    private func applyHighlights() {
+        for annotation in annotationOwners.keys { annotation.page?.removeAnnotation(annotation) }
+        annotationOwners = [:]
+        guard let pdf, !highlights.isEmpty else { return }
+        let text = DocumentText(pdf)
+        for h in highlights { add(h, using: text) }
+    }
+
+    private func add(_ h: StoredHighlight, using text: DocumentText) {
+        guard let pdf else { return }
+        for (pageIndex, range) in text.locate(h) {
+            guard let page = pdf.page(at: pageIndex), let selection = page.selection(for: range) else { continue }
+            for line in selection.selectionsByLine() {
+                let bounds = line.bounds(for: page)
+                guard bounds.width >= 1, bounds.height >= 1 else { continue }
+                let annotation = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
+                annotation.color = h.color.annotationColor
+                page.addAnnotation(annotation)
+                annotationOwners[annotation] = h.id
+            }
+        }
+    }
+
+    private func contextItems(for annotation: PDFAnnotation?) -> [NSMenuItem] {
+        if let annotation, let id = annotationOwners[annotation],
+           let h = highlights.first(where: { $0.id == id }) {
+            var items: [NSMenuItem] = HighlightColor.allCases.map { color in
+                ClosureMenuItem(color.name, image: color.swatch, state: color == h.color ? .on : .off) { [weak self] in
+                    self?.setColor(color, for: id)
+                }
+            }
+            items.append(.separator())
+            items.append(ClosureMenuItem("Remove Highlight") { [weak self] in self?.removeHighlight(id) })
+            return items
+        }
+        guard hasSelection else { return [] }
+        let submenu = NSMenu()
+        for color in HighlightColor.allCases {
+            submenu.addItem(ClosureMenuItem(color.name, image: color.swatch) { [weak self] in
+                self?.highlightColor = color
+                self?.highlightSelection(color)
+            })
+        }
+        let with = NSMenuItem(title: "Highlight With", action: nil, keyEquivalent: "")
+        with.submenu = submenu
+        return [
+            ClosureMenuItem("Highlight", image: highlightColor.swatch) { [weak self] in self?.highlightSelection() },
+            with,
+        ]
+    }
 
     // MARK: - Print & export
 

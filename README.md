@@ -25,6 +25,12 @@ strikethrough, autolinks, footnotes, `> [!NOTE]` admonitions and `==highlight==`
   images next to the markdown file. That's fine for Developer ID or local use,
   but the Mac App Store wouldn't accept it. Remote (http) images don't load in
   Quick Look.
+- **Highlights**: select text and highlight it, as in Preview. Highlights are
+  saved in `~/Library/Application Support/Predown/highlights.json`, never in your
+  files. Each one is stored as its text plus a little context on either side, and
+  is placed again after every render, so small edits to the markdown don't lose
+  it. If its text is deleted it stays saved, and comes back if the text does.
+  Highlights are real PDF annotations, so they're included in Export as PDF.
 - **Live reload**: the window watches the file and re-renders when it changes,
   keeping your page and zoom.
 
@@ -76,6 +82,8 @@ make preview FILE=sample.md
 | ⌘+ / ⌘- / ⌘0 / ⌘9 | Zoom in / out / actual size / zoom to fit |
 | ⌥⌘2 / ⌥⌘3 / ⌃⌘S | Thumbnails / table of contents / toggle sidebar |
 | ⌥⌘↑ / ⌥⌘↓ | Previous / next page |
+| ⌃⌘H | Highlight the selection (toolbar highlighter: highlight as you select) |
+| Right-click a highlight | Change its colour or remove it |
 | ⌘R | Reload |
 | ⌘P | Print |
 
